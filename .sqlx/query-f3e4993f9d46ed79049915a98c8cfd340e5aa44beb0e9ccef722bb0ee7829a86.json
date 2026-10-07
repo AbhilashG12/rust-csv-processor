@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, status, total_rows, processed_rows, valid_rows, invalid_rows FROM imports WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_rows",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "processed_rows",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "valid_rows",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "invalid_rows",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f3e4993f9d46ed79049915a98c8cfd340e5aa44beb0e9ccef722bb0ee7829a86"
+}

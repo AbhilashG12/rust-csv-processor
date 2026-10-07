@@ -1,16 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO imports (id, file_name, status) VALUES ($1, $2, $3)",
+  "query": "INSERT INTO imports (id, file_name, status) VALUES ($1, $2, 'PENDING')",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Text"
       ]
     },
     "nullable": []
   },
-  "hash": "6ce300e2a7b979ca9702de0a4300a0f6a25c2b325db522ee97bc8d58ac838db7"
+  "hash": "3e9ea29e0cc37aad95bfa2befda8f7e45e3f778c38d73cb24ce4fea443e2d177"
 }

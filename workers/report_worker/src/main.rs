@@ -3,6 +3,7 @@ use serde::Serialize;
 use shared::db::get_db_pool;
 use sqlx::PgPool;
 use uuid::Uuid;
+use tracing::{info, error};
 use futures_lite::stream::StreamExt;
 
 #[derive(Serialize)]
@@ -12,20 +13,30 @@ struct ReportRecord {
     total_quantity: i64,
     total_amount: sqlx::types::Decimal,
 }
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pool = get_db_pool("postgres://myuser:mypassword@localhost:5432/csv_processor").await?;
-    let conn = Connection::connect("amqp://guest:guest@localhost:5672", ConnectionProperties::default()).await?;
-    let channel = conn.create_channel().await?;
+    tracing_subscriber::fmt()
+        .json()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
 
+    let db_url = std::env::var("DATABASE_URL")
+    .unwrap_or_else(|_| "postgres://myuser:mypassword@localhost:5432/csv_processor".to_string());
+let pool = get_db_pool(&db_url).await?;
+
+let rabbit_url = std::env::var("RABBITMQ_URL")
+    .unwrap_or_else(|_| "amqp://guest:guest@rabbitmq:5672".to_string());
+let conn = Connection::connect(&rabbit_url, ConnectionProperties::default()).await?;
+    
+    let channel = conn.create_channel().await?;
     channel.basic_qos(1, BasicQosOptions::default()).await?;
 
     let mut consumer = channel
         .basic_consume("report_jobs", "report_worker", BasicConsumeOptions::default(), FieldTable::default())
         .await?;
 
-    println!("Report Worker listening for jobs...");
+    info!(event = "worker_started", worker = "report_worker", "Report Worker listening for jobs");
 
     while let Some(delivery) = consumer.next().await {
         if let Ok(delivery) = delivery {
@@ -36,10 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match process_report(&pool, report_id, import_id).await {
                 Ok(_) => {
                     delivery.ack(BasicAckOptions::default()).await?;
-                    println!("Successfully generated report: {}", report_id);
+                    info!(event = "report_completed", report_id = %report_id, import_id = %import_id, "Successfully generated report");
                 }
                 Err(e) => {
-                    println!("Failed to process report {}: {:?}", report_id, e);
+                    error!(event = "report_failed", report_id = %report_id, error = %e, "Failed to process report");
                     let _ = sqlx::query!("UPDATE reports SET status = 'FAILED', error = $1 WHERE id = $2", e.to_string(), report_id)
                         .execute(&pool).await;
                     delivery.ack(BasicAckOptions::default()).await?; 

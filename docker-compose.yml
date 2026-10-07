@@ -11,15 +11,64 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d csv_processor"]
+      interval: 5s
+      retries: 5
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
     ports:
-      - "5672:5672" 
-      - "15672:15672" 
+      - "5672:5672"
+      - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      retries: 5
+
+  api:
+    build: .
+    command: api
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://myuser:mypassword@postgres:5432/csv_processor
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  import-worker:
+    build: .
+    command: import_worker
+    environment:
+      - DATABASE_URL=postgres://myuser:mypassword@postgres:5432/csv_processor
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      api:
+        condition: service_started
+
+  report-worker:
+    build: .
+    command: report_worker
+    environment:
+      - DATABASE_URL=postgres://myuser:mypassword@postgres:5432/csv_processor
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      api:
+        condition: service_started
 
 volumes:
   pgdata:
   rabbitmq_data:
+  uploads_data:

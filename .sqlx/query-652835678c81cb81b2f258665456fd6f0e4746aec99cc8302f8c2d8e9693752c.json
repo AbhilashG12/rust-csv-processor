@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            user_id, \n            COUNT(order_id) as \"total_orders!\", \n            SUM(quantity) as \"total_quantity!\", \n            SUM(unit_price * quantity) as \"total_amount!\"\n        FROM import_rows \n        WHERE import_id = $1 \n        GROUP BY user_id\n        ORDER BY user_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_orders!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_quantity!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_amount!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "652835678c81cb81b2f258665456fd6f0e4746aec99cc8302f8c2d8e9693752c"
+}

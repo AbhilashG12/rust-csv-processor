@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT row_number as row, reason FROM invalid_rows WHERE import_id = $1 ORDER BY row_number ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "row",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "95b02e404b47acad5ecff5ba47863ac03afc7423facd60a6222b0062ef115f0b"
+}

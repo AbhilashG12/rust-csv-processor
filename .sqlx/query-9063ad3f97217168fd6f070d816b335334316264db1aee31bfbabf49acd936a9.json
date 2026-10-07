@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE imports \n                SET status = 'PENDING', error = 'Worker crashed mid-job, recovering...'\n                WHERE status = 'PROCESSING' AND started_at < NOW() - INTERVAL '15 minutes'\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "9063ad3f97217168fd6f070d816b335334316264db1aee31bfbabf49acd936a9"
+}

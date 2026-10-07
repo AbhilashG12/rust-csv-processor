@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE imports SET status = $1, total_rows = $2, valid_rows = $3, invalid_rows = $4, completed_at = NOW() WHERE id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b986ec15eca6294702cbefa42a89d1012f8dc745a59799cd5585814f9f02644a"
+}

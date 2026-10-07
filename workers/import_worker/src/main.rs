@@ -1,9 +1,11 @@
 use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties};
 use serde::Deserialize;
+use tracing::{info, error};
 use shared::db::get_db_pool;
 use sqlx::PgPool;
 use uuid::Uuid;
 use futures_lite::stream::StreamExt;
+use std::time::Duration;
 
 #[derive(Deserialize, Debug)]
 struct CsvRow {
@@ -11,24 +13,35 @@ struct CsvRow {
     order_id: String,
     product: String,
     quantity: i32,
-    unit_price: sqlx::types::Decimal,
+    unit_price: sqlx::types::Decimal, // Matches NUMERIC in Postgres
     status: String,
 }
 
+const MAX_ATTEMPTS: i32 = 3;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pool = get_db_pool("postgres://myuser:mypassword@localhost:5432/csv_processor").await?;
-    let conn = Connection::connect("amqp://guest:guest@localhost:5672", ConnectionProperties::default()).await?;
-    let channel = conn.create_channel().await?;
+    tracing_subscriber::fmt()
+        .json()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
 
-    // Prefetch count of 1 ensures fair dispatch (worker doesn't hoard messages)
+    let db_url = std::env::var("DATABASE_URL")
+    .unwrap_or_else(|_| "postgres://myuser:mypassword@localhost:5432/csv_processor".to_string());
+let pool = get_db_pool(&db_url).await?;
+
+let rabbit_url = std::env::var("RABBITMQ_URL")
+    .unwrap_or_else(|_| "amqp://guest:guest@rabbitmq:5672".to_string());
+let conn = Connection::connect(&rabbit_url, ConnectionProperties::default()).await?;
+    
+    let channel = conn.create_channel().await?;
     channel.basic_qos(1, BasicQosOptions::default()).await?;
 
     let mut consumer = channel
         .basic_consume("import_jobs", "import_worker", BasicConsumeOptions::default(), FieldTable::default())
         .await?;
 
-    println!("Import Worker listening for jobs...");
+    info!(event = "worker_started", worker = "import_worker", "Import Worker listening for jobs");
 
     while let Some(delivery) = consumer.next().await {
         if let Ok(delivery) = delivery {
@@ -36,18 +49,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let import_id = Uuid::parse_str(payload["import_id"].as_str().unwrap())?;
             let file_path = payload["file_path"].as_str().unwrap().to_string();
 
+            let job = sqlx::query!("SELECT attempts FROM imports WHERE id = $1", import_id)
+                .fetch_optional(&pool).await?;
+            
+            let current_attempts = job.map(|j| j.attempts).unwrap_or(0);
+
             match process_import(&pool, import_id, &file_path).await {
-                Ok(_) => {
+                Ok(true) => {
                     delivery.ack(BasicAckOptions::default()).await?;
-                    println!("Successfully processed import: {}", import_id);
+                    info!(event = "import_completed", job_id = %import_id, "Successfully processed import");
+                }
+                Ok(false) => {
+                    delivery.ack(BasicAckOptions::default()).await?;
                 }
                 Err(e) => {
-                    println!("Failed to process import {}: {:?}", import_id, e);
-                    // Nack with requeue=false if we want it to go to a DLQ, or true to retry.
-                    // For this assignment, we mark DB as FAILED and ack the message to remove it from the queue.
-                    let _ = sqlx::query!("UPDATE imports SET status = 'FAILED', error = $1 WHERE id = $2", e.to_string(), import_id)
-                        .execute(&pool).await;
-                    delivery.ack(BasicAckOptions::default()).await?; 
+                    error!(event = "import_failed", job_id = %import_id, attempt = current_attempts, error = %e, "Failed to process import");
+                    
+                    if current_attempts >= MAX_ATTEMPTS {
+                        let _ = sqlx::query!(
+                            "UPDATE imports SET status = 'FAILED', error = $1 WHERE id = $2", 
+                            format!("Max attempts reached. Last error: {}", e), import_id
+                        ).execute(&pool).await;
+                        
+                        delivery.ack(BasicAckOptions::default()).await?; 
+                    } else {
+                        let backoff_secs = 2_u64.pow((current_attempts + 1) as u32);
+                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                        delivery.nack(BasicNackOptions { multiple: false, requeue: true }).await?;
+                    }
                 }
             }
         }
@@ -55,8 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Claim Job safely
+async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    // 1. Transactional Claiming
+    // The RETURNING id ensures that if two workers query this concurrently, only one gets the row.
     let claimed = sqlx::query!(
         "UPDATE imports SET status = 'PROCESSING', started_at = NOW(), attempts = attempts + 1 WHERE id = $1 AND status = 'PENDING' RETURNING id",
         import_id
@@ -64,7 +94,7 @@ async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Resu
     .fetch_optional(pool).await?;
 
     if claimed.is_none() {
-        return Ok(()); // Job was already picked up by another worker or is done
+        return Ok(false); // Job was already picked up by another worker or is already done
     }
 
     // 2. Read CSV Streaming
@@ -77,7 +107,8 @@ async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Resu
         row_number += 1;
         match result {
             Ok(row) => {
-                // Insert valid row (ON CONFLICT DO NOTHING handles duplicate processing if worker crashed mid-job previously)
+                // Duplicate row processing: ON CONFLICT DO NOTHING handles duplicates 
+                // if a worker crashed midway and is retrying this file.
                 sqlx::query!(
                     r#"
                     INSERT INTO import_rows (import_id, user_id, order_id, product, quantity, unit_price, status)
@@ -90,7 +121,7 @@ async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Resu
             }
             Err(e) => {
                 // Insert invalid row
-                let raw_record = e.to_string(); // In a production app, we'd extract the raw StringRecord from the error
+                let raw_record = e.to_string();
                 sqlx::query!(
                     "INSERT INTO invalid_rows (import_id, row_number, raw_data, reason) VALUES ($1, $2, $3, $4)",
                     import_id, row_number, raw_record, "Parse Error: Invalid format or missing fields"
@@ -108,7 +139,7 @@ async fn process_import(pool: &PgPool, import_id: Uuid, file_path: &str) -> Resu
         final_status, valid_count + invalid_count, valid_count, invalid_count, import_id
     ).execute(pool).await?;
 
-    Ok(())
+    Ok(true) // Successfully processed and committed
 }
 
 #[cfg(test)]
@@ -122,6 +153,8 @@ mod tests {
     async fn test_process_import_handles_invalid_rows() {
         let pool = get_db_pool("postgres://myuser:mypassword@localhost:5432/csv_processor").await.unwrap();
         let import_id = Uuid::new_v4();
+        
+        // Generate cross-platform temp path for Windows compatibility
         let mut temp_path = std::env::temp_dir();
         temp_path.push(format!("test_import_{}.csv", import_id));
         let file_path = temp_path.to_str().unwrap().to_string();
@@ -143,7 +176,8 @@ mod tests {
         .unwrap();
 
         // 3. Execute the worker function
-        process_import(&pool, import_id, &file_path).await.unwrap();
+        let result = process_import(&pool, import_id, &file_path).await.unwrap();
+        assert_eq!(result, true, "Worker should successfully claim and process the job");
 
         // 4. Assert Job Status
         let job = sqlx::query!("SELECT status, total_rows, valid_rows, invalid_rows FROM imports WHERE id = $1", import_id)
@@ -166,5 +200,46 @@ mod tests {
         // Cleanup
         let _ = fs::remove_file(&file_path);
         sqlx::query!("DELETE FROM imports WHERE id = $1", import_id).execute(&pool).await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod csv_tests {
+    use super::*;
+    use csv::ReaderBuilder;
+
+    #[test]
+    fn test_parse_valid_row() {
+        let data = "user_id,order_id,product,quantity,unit_price,status\n\
+                    U001,O1001,Laptop,2,750.00,completed";
+        let mut rdr = ReaderBuilder::new().from_reader(data.as_bytes());
+        let result: Result<CsvRow, _> = rdr.deserialize().next().unwrap();
+        
+        assert!(result.is_ok());
+        let row = result.unwrap();
+        assert_eq!(row.user_id, "U001");
+        assert_eq!(row.order_id, "O1001");
+        assert_eq!(row.quantity, 2);
+    }
+
+    #[test]
+    fn test_parse_invalid_unit_price() {
+        // Matches the assignment's specific invalid data requirement
+        let data = "user_id,order_id,product,quantity,unit_price,status\n\
+                    0006,O1011,Keyboard,1,abc,completed";
+        let mut rdr = ReaderBuilder::new().from_reader(data.as_bytes());
+        let result: Result<CsvRow, _> = rdr.deserialize().next().unwrap();
+        
+        assert!(result.is_err(), "Non-numeric unit_price should fail deserialization");
+    }
+
+    #[test]
+    fn test_parse_invalid_quantity() {
+        let data = "user_id,order_id,product,quantity,unit_price,status\n\
+                    U007,O1012,Monitor,not_a_number,250.00,completed";
+        let mut rdr = ReaderBuilder::new().from_reader(data.as_bytes());
+        let result: Result<CsvRow, _> = rdr.deserialize().next().unwrap();
+        
+        assert!(result.is_err(), "Non-integer quantity should fail deserialization");
     }
 }

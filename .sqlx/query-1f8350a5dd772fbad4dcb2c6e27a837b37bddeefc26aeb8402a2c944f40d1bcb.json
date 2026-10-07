@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE imports SET status = 'PROCESSING', started_at = NOW(), attempts = attempts + 1 WHERE id = $1 AND status = 'PENDING' RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1f8350a5dd772fbad4dcb2c6e27a837b37bddeefc26aeb8402a2c944f40d1bcb"
+}

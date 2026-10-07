@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reports (id, import_id, status) VALUES ($1, $2, 'PENDING')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "212b40085800de2832f34ac24978c09c46bc3a72da0ee6f30a83651a8cfb56a9"
+}

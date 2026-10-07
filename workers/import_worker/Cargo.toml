@@ -13,3 +13,5 @@ uuid = { workspace = true, features = ["v4"] }
 lapin = { workspace = true }
 csv = { workspace = true }
 futures-lite = "2.3.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
