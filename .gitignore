@@ -1,0 +1,12 @@
+# Rust build artifacts
+/target/
+
+# Environment variables and secrets
+.env
+
+# Temporary uploaded files
+/uploads/
+
+# Local test data
+test.csv
+
