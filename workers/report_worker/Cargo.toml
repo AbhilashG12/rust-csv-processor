@@ -1,0 +1,14 @@
+[package]
+name = "report_worker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shared = { path = "../../shared" }
+tokio = { workspace = true, features = ["full"] }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+lapin = { workspace = true }
+futures-lite = "1.13.0"

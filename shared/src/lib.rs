@@ -62,7 +62,7 @@ pub struct ImportedRow {
     pub order_id: String,
     pub product: String,
     pub quantity: i32,
-    pub unit_price: rust_decimal::Decimal,
+    pub unit_price: sqlx::types::Decimal,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
