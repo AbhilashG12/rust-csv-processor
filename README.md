@@ -56,7 +56,7 @@ Example response:
 
 ### 2. Check Import Status
 
-curl http://localhost:3000/imports/<UUID>
+curl http://localhost:3000/imports/{uuid}
 
 
 Example response:
@@ -66,7 +66,7 @@ Example response:
 
 ### 3. View Invalid Rows
 
-curl http://localhost:3000/imports/<UUID>/errors
+curl http://localhost:3000/imports/{uuid}/errors
 
 
 Example response:
@@ -76,7 +76,7 @@ Example response:
 
 ### 4. Request a Report
 
-curl -X POST http://localhost:3000/imports/<UUID>/reports
+curl -X POST http://localhost:3000/imports/{uuid}/reports
 
 
 Example response:
@@ -86,7 +86,7 @@ Example response:
 
 ### 5. Fetch Report Data
 
-curl http://localhost:3000/reports/<REPORT_UUID>
+curl http://localhost:3000/reports/{report_uuid}
 
 
 Example response:

@@ -25,8 +25,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::fs::create_dir_all("./uploads").await?;
 
     let db_url = std::env::var("DATABASE_URL")
-    .unwrap_or_else(|_| "postgres://myuser:mypassword@localhost:5432/csv_processor".to_string());
+        .unwrap_or_else(|_| "postgres://myuser:mypassword@localhost:5432/csv_processor".to_string());
     let pool = get_db_pool(&db_url).await?;
+
+    let rabbit_url = std::env::var("RABBITMQ_URL")
+        // Default to the Docker hostname if the env var is missing
+        .unwrap_or_else(|_| "amqp://guest:guest@rabbitmq:5672".to_string());
+
+    // Robust connection retry loop
+    let rabbit_conn = loop {
+        match lapin::Connection::connect(&rabbit_url, lapin::ConnectionProperties::default()).await {
+            Ok(conn) => {
+                println!("Successfully connected to RabbitMQ!");
+                break conn;
+            }
+            Err(e) => {
+                println!("Waiting for RabbitMQ... ({})", e);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    };
+    let channel = rabbit_conn.create_channel().await?;
     let state_pool = pool.clone();
 
     
@@ -39,10 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/reports/:id", get(routes::get_report))
         .layer(Extension(state_pool));
 
-    let rabbit_url = std::env::var("RABBITMQ_URL")
-    .unwrap_or_else(|_| "amqp://guest:guest@rabbitmq:5672".to_string());
-    let rabbit_conn = Connection::connect(&rabbit_url, ConnectionProperties::default()).await?;
-    let channel = rabbit_conn.create_channel().await?;
+    
 
     channel.queue_declare("import_jobs", QueueDeclareOptions::default(), FieldTable::default()).await?;
     channel.queue_declare("report_jobs", QueueDeclareOptions::default(), FieldTable::default()).await?;
